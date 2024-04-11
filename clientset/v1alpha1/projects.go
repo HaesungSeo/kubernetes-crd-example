@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"context"
+
 	"github.com/martin-helmich/kubernetes-crd-example/api/types/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -9,10 +11,10 @@ import (
 )
 
 type ProjectInterface interface {
-	List(opts metav1.ListOptions) (*v1alpha1.ProjectList, error)
-	Get(name string, options metav1.GetOptions) (*v1alpha1.Project, error)
-	Create(*v1alpha1.Project) (*v1alpha1.Project, error)
-	Watch(opts metav1.ListOptions) (watch.Interface, error)
+	List(ctx context.Context, opts metav1.ListOptions) (*v1alpha1.ProjectList, error)
+	Get(ctx context.Context, name string, options metav1.GetOptions) (*v1alpha1.Project, error)
+	Create(ctx context.Context, project *v1alpha1.Project) (*v1alpha1.Project, error)
+	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	// ...
 }
 
@@ -21,20 +23,20 @@ type projectClient struct {
 	ns         string
 }
 
-func (c *projectClient) List(opts metav1.ListOptions) (*v1alpha1.ProjectList, error) {
+func (c *projectClient) List(ctx context.Context, opts metav1.ListOptions) (*v1alpha1.ProjectList, error) {
 	result := v1alpha1.ProjectList{}
 	err := c.restClient.
 		Get().
 		Namespace(c.ns).
 		Resource("projects").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Do(ctx).
 		Into(&result)
 
 	return &result, err
 }
 
-func (c *projectClient) Get(name string, opts metav1.GetOptions) (*v1alpha1.Project, error) {
+func (c *projectClient) Get(ctx context.Context, name string, opts metav1.GetOptions) (*v1alpha1.Project, error) {
 	result := v1alpha1.Project{}
 	err := c.restClient.
 		Get().
@@ -42,31 +44,31 @@ func (c *projectClient) Get(name string, opts metav1.GetOptions) (*v1alpha1.Proj
 		Resource("projects").
 		Name(name).
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Do().
+		Do(ctx).
 		Into(&result)
 
 	return &result, err
 }
 
-func (c *projectClient) Create(project *v1alpha1.Project) (*v1alpha1.Project, error) {
+func (c *projectClient) Create(ctx context.Context, project *v1alpha1.Project) (*v1alpha1.Project, error) {
 	result := v1alpha1.Project{}
 	err := c.restClient.
 		Post().
 		Namespace(c.ns).
 		Resource("projects").
 		Body(project).
-		Do().
+		Do(ctx).
 		Into(&result)
 
 	return &result, err
 }
 
-func (c *projectClient) Watch(opts metav1.ListOptions) (watch.Interface, error) {
+func (c *projectClient) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
 	opts.Watch = true
 	return c.restClient.
 		Get().
 		Namespace(c.ns).
 		Resource("projects").
 		VersionedParams(&opts, scheme.ParameterCodec).
-		Watch()
+		Watch(ctx)
 }

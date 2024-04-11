@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
-	"time"
+	"os"
+	"path/filepath"
 
 	"github.com/martin-helmich/kubernetes-crd-example/api/types/v1alpha1"
 	clientV1alpha1 "github.com/martin-helmich/kubernetes-crd-example/clientset/v1alpha1"
@@ -14,49 +16,68 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-var kubeconfig string
-
-func init() {
-	flag.StringVar(&kubeconfig, "kubeconfig", "", "path to Kubernetes config file")
-	flag.Parse()
-}
-
 func main() {
-	var config *rest.Config
-	var err error
+	defconf := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	kubeconfig := flag.String("k", defconf, "path to Kubernetes config file")
+	ns := flag.String("n", "default", "name space")
+	flag.Parse()
 
-	if kubeconfig == "" {
+	// Bootstrap k8s configuration from local       Kubernetes config file
+	log.Println("Using kubeconfig file: ", *kubeconfig)
+	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
+	if err != nil {
+		log.Println(err)
+		// Try it again
 		log.Printf("using in-cluster configuration")
 		config, err = rest.InClusterConfig()
-	} else {
-		log.Printf("using configuration from '%s'", kubeconfig)
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
-	if err != nil {
-		panic(err)
-	}
-
+	// Register CRD scheme
 	v1alpha1.AddToScheme(scheme.Scheme)
 
+	// Create an rest client not targeting specific API version
 	clientSet, err := clientV1alpha1.NewForConfig(config)
 	if err != nil {
 		panic(err)
 	}
-
-	projects, err := clientSet.Projects("default").List(metav1.ListOptions{})
+	projects, err := clientSet.Projects(*ns).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		panic(err)
 	}
+	fmt.Printf("%d projects found:\n", len(projects.Items))
+	for _, p := range projects.Items {
+		fmt.Printf("%+v\n", p)
+	}
 
-	fmt.Printf("projects found: %+v\n", projects)
+	// Set up a watch on the Kubernetes API for changes to crd project
+	watcher, err := clientSet.Projects(*ns).Watch(context.Background(), metav1.ListOptions{
+		ResourceVersion: projects.ResourceVersion,
+	})
+	if err != nil {
+		log.Fatalln("failed to get watch channel:", err)
+	}
 
-	store := WatchResources(clientSet)
-
+	// Iterate the crd event
 	for {
-		projectsFromStore := store.List()
-		fmt.Printf("project in store: %d\n", len(projectsFromStore))
+		select {
+		case event := <-watcher.ResultChan():
+			if event.Object == nil {
+				// Once the channel broken, need to restart the process
+				log.Fatalln("nil event")
+			}
+			project, ok := event.Object.(*v1alpha1.Project)
+			if !ok {
+				str := fmt.Sprintf("%s: unexpected event Object type: %T\n", event.Type, event.Object)
+				log.Fatalln(str)
+				return
+			}
 
-		time.Sleep(2 * time.Second)
+			// access crd object just like built-in object!
+			log.Printf("%s: %s\n", event.Type, project.Name)
+			log.Printf("  spec.replicas %d\n", project.Spec.Replicas)
+		}
 	}
 }
